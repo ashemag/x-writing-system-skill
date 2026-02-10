@@ -5,8 +5,9 @@ import argparse
 import json
 from pathlib import Path
 
-from lib.analyze import generate_advice
-from lib.api import fetch_recent_posts, iso_utc_now_minus_days
+from lib.analyze import extract_topics, generate_advice
+from lib.api import fetch_recent_posts, iso_utc_now_minus_days, search_topic_posts
+from lib.env import default_env_candidates, load_env_files
 
 
 def read_draft(args: argparse.Namespace) -> str:
@@ -41,21 +42,60 @@ def cmd_fetch(args: argparse.Namespace) -> int:
 def cmd_advise(args: argparse.Namespace) -> int:
     draft = read_draft(args)
     posts_path = args.posts
+    account_fetch_error = None
     if not posts_path:
-        fetched = fetch_recent_posts(
-            days=args.days,
-            max_results=args.max_results,
-            username=args.username,
-            user_id=args.user_id,
-        )
-        posts = fetched.get("data", [])
+        try:
+            fetched = fetch_recent_posts(
+                days=args.days,
+                max_results=args.max_results,
+                username=args.username,
+                user_id=args.user_id,
+            )
+            posts = fetched.get("data", [])
+        except Exception as exc:
+            posts = []
+            account_fetch_error = str(exc)
     else:
         payload = json.loads(Path(posts_path).read_text(encoding="utf-8"))
         posts = payload.get("data", payload if isinstance(payload, list) else [])
 
-    advice = generate_advice(draft, posts)
+    resolved_topics = (
+        [t.strip() for t in args.topics.split(",") if t.strip()]
+        if args.topics
+        else extract_topics(draft, max_topics=args.max_topics)
+    )
+
+    topic_research = None
+    if not args.no_topic_research and resolved_topics:
+        try:
+            topic_research = search_topic_posts(
+                topics=resolved_topics,
+                days=args.topic_days,
+                per_topic_results=args.topic_max_results,
+            )
+        except Exception as exc:
+            topic_research = {
+                "meta": {"error": str(exc)},
+                "topics": {},
+            }
+
+    advice = generate_advice(
+        draft,
+        posts,
+        topic_research=topic_research,
+        topics=resolved_topics,
+        account_fetch_error=account_fetch_error,
+    )
     print(advice)
     return 0
+
+
+def _bootstrap_env(args: argparse.Namespace) -> None:
+    repo_root = Path(__file__).resolve().parent
+    explicit_files = [Path(p) for p in (args.env_file or [])]
+    default_files = default_env_candidates(repo_root)
+    candidates = explicit_files + default_files
+    load_env_files(candidates)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -79,13 +119,27 @@ def build_parser() -> argparse.ArgumentParser:
     advise.add_argument("--max-results", type=int, default=100)
     advise.add_argument("--username", type=str, default=None)
     advise.add_argument("--user-id", type=str, default=None)
+    advise.add_argument("--topics", type=str, default=None, help="Comma-separated topic overrides")
+    advise.add_argument("--max-topics", type=int, default=5, help="Max extracted topics from draft")
+    advise.add_argument("--topic-days", type=int, default=7, help="Lookback days for topic research")
+    advise.add_argument("--topic-max-results", type=int, default=25, help="Per-topic X search result cap")
+    advise.add_argument("--no-topic-research", action="store_true")
     advise.set_defaults(func=cmd_advise)
+
+    for p in (fetch, advise):
+        p.add_argument(
+            "--env-file",
+            action="append",
+            default=None,
+            help="Optional .env file(s) to load. Can be passed multiple times.",
+        )
     return parser
 
 
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    _bootstrap_env(args)
     return args.func(args)
 
 

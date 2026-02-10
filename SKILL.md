@@ -1,11 +1,15 @@
 ---
 name: x-writing-system-skill
-description: Analyze and improve draft X posts using account-specific performance signals from the last 30 days. Use when the user asks for tweet/post rewrites, stronger hooks, thread guidance, or suggestions based on top-performing content by impressions, likes, and reposts.
+description: Analyze and improve draft X posts using a writing-system workflow: apply baseline writing guidelines, learn from top account posts in the last 30 days, research topic-specific top posts on X, and return research-backed suggestions plus 5 improved versions. Use when the user asks for post rewrites, hook optimization, thread guidance, or tactical writing feedback grounded in recent performance data.
 ---
 
 # X Writing System
 
-Use this skill to turn a draft post into a sharper version using the user's own top-performing patterns.
+Use this skill to turn a draft post into a sharper version using:
+
+- baseline writing-system guidelines,
+- the user's own top-performing patterns,
+- topic-specific market signals from X.
 
 For API details and auth nuances, read `references/x-api.md`.
 
@@ -14,16 +18,37 @@ For API details and auth nuances, read `references/x-api.md`.
 1. Ensure X credentials are available via env vars.
 2. Pull posts from the last 30 days:
    - `python3 x-writing.py fetch --username <username> --out data/recent_posts.json`
-3. Rank top posts by:
+3. Rank top account posts by:
    - impressions (primary)
    - likes (secondary)
-   - reposts (secondary)
-4. Compare the draft against top-post patterns:
+   - reposts/replies/quotes (secondary)
+4. Apply baseline writing-system rules:
+   - strong hook
+   - concrete specificity
+   - consistent spacing and readability
+   - punchy bar line
+   - clear CTA
+5. Extract topics from the draft (or use user-provided topics) and search X:
+   - `GET /2/tweets/search/recent`
+6. Rank topic posts by public engagement and extract learnings.
+7. Compare the draft against account + topic patterns:
    - hook strength
    - specificity and examples
    - readability/spacing
    - CTA quality
-5. Return targeted edits and a rewritten draft.
+8. Return targeted edits and:
+   - learnings,
+   - suggestions,
+   - one primary rewritten draft,
+   - 5 improved X post versions.
+
+## Env Loading
+
+The CLI loads env vars in this order (without overwriting already-set env vars):
+
+1. `--env-file` paths (if provided),
+2. `<repo>/.env`,
+3. `../ashe_ai/.env`.
 
 ## Command Reference
 
@@ -45,6 +70,15 @@ Advise with auto-fetch:
 python3 x-writing.py advise --draft-file ./draft.txt --username <username>
 ```
 
+Advise with explicit topics:
+
+```bash
+python3 x-writing.py advise \
+  --draft-file ./draft.txt \
+  --username <username> \
+  --topics "topic a,topic b,topic c"
+```
+
 ## Output Format
 
 ```markdown
@@ -54,18 +88,32 @@ python3 x-writing.py advise --draft-file ./draft.txt --username <username>
 - Shareability: X/10
 - Clarity: X/10
 
-## What Works
+## Writing System Guidelines Applied
 - ...
 
-## Improve Next
+## Personal Learnings (Last 30 Days)
 - ...
 
-## Rewritten Draft
+## Topic Research Learnings
+- ...
+
+## Improvement Suggestions
+- ...
+
+## Rewritten Draft (Primary)
 ...
 
-## Why These Changes
-- Pattern observed in top posts: ...
-- Applied to draft by: ...
+## 5 Improved X Post Versions
+### Version 1
+...
+### Version 2
+...
+### Version 3
+...
+### Version 4
+...
+### Version 5
+...
 ```
 
 ## Guardrails
