@@ -33,20 +33,16 @@ bun install
 cp .env.example .env
 ```
 
-Minimum required:
+Required:
 
 - `X_BEARER_TOKEN`
-
-Optional:
-
-- `X_USERNAME` or `X_USER_ID` (can also be passed via flags)
-- OAuth1 keys if you want OAuth1 mode
+- `X_AUTH_MODE=bearer`
 
 Env loading behavior:
 
 1. `--env-file` (if provided)
 2. `<repo>/.env`
-3. Bearer fallback: `~/.config/env/global.env` (only if token still missing)
+3. `~/.config/env/global.env` (only if token still missing)
 
 Existing process env vars are never overwritten.
 
@@ -74,6 +70,17 @@ bun run x-search.ts advise \
   --topic-search-attempts 3
 ```
 
+### Optional: pass topics explicitly
+
+```bash
+bun run x-search.ts advise \
+  --draft-file ./draft.txt \
+  --username ashebytes \
+  --topics "agent skills,x api,writing systems" \
+  --performant-like-threshold 50 \
+  --topic-search-attempts 3
+```
+
 ### Save markdown output
 
 ```bash
@@ -83,8 +90,8 @@ bun run x-search.ts advise --draft-file ./draft.txt --username ashebytes --save
 ## Command behavior
 
 - `fetch`: pulls your account posts in the selected window.
-- `research`: adaptive X topic search (combined query by default to reduce API calls).
-- `advise`: merges draft + personal winners + topic winners + trends into a markdown research brief.
+- `research`: adaptive X topic search that broadens terms across attempts until it finds strong samples (or exhausts attempts).
+- `advise`: merges draft + Matt Gray guideline baseline + personal winners + topic winners + trends overlap into a markdown research brief.
 
 Quick mode (`--quick`) uses smaller pulls and longer cache TTL for cheaper iteration.
 
@@ -93,10 +100,20 @@ Quick mode (`--quick`) uses smaller pulls and longer cache TTL for cheaper itera
 `advise` outputs:
 
 - Closest trending topics
-- Topic research sample posts (with metrics)
-- Top personal posts (with metrics)
+- Topic research sample posts (with likes/reposts/replies)
+- Top personal posts from the last 30 days (with impressions + engagement)
 - 3 specific recommendations
 - LLM writing task to produce 5 final versions dynamically
+
+## Full system power
+
+This skill is designed to run as a data + reasoning system, not a simple template generator:
+
+- **Personal calibration:** learns from your real winners in the last 30 days.
+- **Market calibration:** runs adaptive topic research to find high-signal examples on X.
+- **Trend awareness:** checks closest live trend overlap for timing/context.
+- **Cost-aware operation:** caches results and supports quick mode.
+- **LLM-native output:** final 5 versions are authored by the model from evidence, not hardcoded templates.
 
 ## Project layout
 

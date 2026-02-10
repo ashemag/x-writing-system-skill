@@ -29,17 +29,9 @@ For ranking, the skill reads:
 
 ## Auth
 
-Recommended default:
+Use bearer token auth via `X_BEARER_TOKEN`.
 
-- Bearer token auth via `X_BEARER_TOKEN`
-
-Optional:
-
-- OAuth 1.0a user context via:
-  - `X_API_KEY`
-  - `X_API_KEY_SECRET`
-  - `X_ACCESS_TOKEN`
-  - `X_ACCESS_TOKEN_SECRET`
+For this repo's intended setup, keep `X_AUTH_MODE=bearer`.
 
 ## Topic Search Notes
 
