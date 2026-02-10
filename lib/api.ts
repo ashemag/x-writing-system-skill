@@ -1,7 +1,9 @@
-import { createHmac, randomBytes } from "node:crypto";
+/**
+ * X API wrapper — bearer token only, same pattern as rohunvora/x-research-skill.
+ * Token from X_BEARER_TOKEN (env or ~/.config/env/global.env).
+ */
 import { readFileSync } from "node:fs";
 import type {
-  AuthMode,
   FetchRecentPostsResult,
   Post,
   TopicResearchResult,
@@ -11,6 +13,19 @@ import type {
 
 const API_BASE = "https://api.x.com/2";
 
+function getToken(): string {
+  if (process.env.X_BEARER_TOKEN?.trim()) return process.env.X_BEARER_TOKEN.trim();
+  try {
+    const path = `${process.env.HOME}/.config/env/global.env`;
+    const content = readFileSync(path, "utf8");
+    const match = content.match(/X_BEARER_TOKEN=["']?([^"'\n]+)/);
+    if (match?.[1]) return match[1];
+  } catch {
+    // ignore
+  }
+  throw new Error("X_BEARER_TOKEN not found in env or ~/.config/env/global.env");
+}
+
 export function isoUtcNowMinusDays(days: number): string {
   const now = Date.now();
   const ms = Math.max(0, days) * 24 * 60 * 60 * 1000;
@@ -18,92 +33,8 @@ export function isoUtcNowMinusDays(days: number): string {
   return dt.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
-function pct(v: string): string {
-  return encodeURIComponent(v).replace(/[!'()*]/g, (ch) =>
-    `%${ch.charCodeAt(0).toString(16).toUpperCase()}`
-  );
-}
-
-function authMode(): AuthMode {
-  const oauth1Ready =
-    !!process.env.X_API_KEY &&
-    !!process.env.X_API_KEY_SECRET &&
-    !!process.env.X_ACCESS_TOKEN &&
-    !!process.env.X_ACCESS_TOKEN_SECRET;
-  const bearerReady = !!getBearerToken();
-  if (!oauth1Ready && !bearerReady) {
-    throw new Error("No auth found. Set OAuth 1.0a vars or X_BEARER_TOKEN.");
-  }
-  const forced = (process.env.X_AUTH_MODE ?? "auto").toLowerCase();
-  if (forced === "oauth1") {
-    if (!oauth1Ready) throw new Error("X_AUTH_MODE=oauth1 set, but OAuth1 credentials are missing.");
-    return "oauth1";
-  }
-  if (forced === "bearer") {
-    if (!bearerReady) throw new Error("X_AUTH_MODE=bearer set, but X_BEARER_TOKEN is missing.");
-    return "bearer";
-  }
-  // In auto mode, prefer bearer for read endpoints because OAuth1 is more likely
-  // to hit stricter per-user limits in this setup.
-  if (bearerReady) return "bearer";
-  return "oauth1";
-}
-
-function getBearerToken(): string | null {
-  if (process.env.X_BEARER_TOKEN?.trim()) return process.env.X_BEARER_TOKEN.trim();
-  try {
-    const path = `${process.env.HOME}/.config/env/global.env`;
-    const content = readFileSync(path, "utf8");
-    const match = content.match(/^\s*X_BEARER_TOKEN\s*=\s*["']?([^"'\n]+)["']?\s*$/m);
-    if (match?.[1]) return match[1];
-  } catch {
-    // ignore fallback errors
-  }
-  return null;
-}
-
-function oauth1Header(method: string, url: string, query: Record<string, string>): string {
-  const consumerKey = process.env.X_API_KEY!;
-  const consumerSecret = process.env.X_API_KEY_SECRET!;
-  const accessToken = process.env.X_ACCESS_TOKEN!;
-  const accessTokenSecret = process.env.X_ACCESS_TOKEN_SECRET!;
-
-  const oauth: Record<string, string> = {
-    oauth_consumer_key: consumerKey,
-    oauth_nonce: randomBytes(12).toString("hex"),
-    oauth_signature_method: "HMAC-SHA1",
-    oauth_timestamp: String(Math.floor(Date.now() / 1000)),
-    oauth_token: accessToken,
-    oauth_version: "1.0",
-  };
-
-  const all = { ...query, ...oauth };
-  const paramString = Object.entries(all)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${pct(k)}=${pct(v)}`)
-    .join("&");
-  const base = [method.toUpperCase(), pct(url), pct(paramString)].join("&");
-  const signingKey = `${pct(consumerSecret)}&${pct(accessTokenSecret)}`;
-  const sig = createHmac("sha1", signingKey).update(base).digest("base64");
-  oauth.oauth_signature = sig;
-  return (
-    "OAuth " +
-    Object.entries(oauth)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, v]) => `${pct(k)}="${pct(v)}"`)
-      .join(", ")
-  );
-}
-
-function authHeaders(
-  method: string,
-  url: string,
-  query: Record<string, string>,
-  mode: AuthMode
-): Record<string, string> {
-  if (mode === "oauth1") return { Authorization: oauth1Header(method, url, query) };
-  const token = getBearerToken();
-  if (!token) throw new Error("Missing X_BEARER_TOKEN (env or ~/.config/env/global.env)");
+function authHeaders(url: string, query: Record<string, string>): Record<string, string> {
+  const token = getToken();
   return { Authorization: `Bearer ${token}` };
 }
 
@@ -176,10 +107,10 @@ async function httpGet<T>(
   }
 }
 
-async function resolveUserId(username: string, mode: AuthMode): Promise<string> {
+async function resolveUserId(username: string): Promise<string> {
   const url = `${API_BASE}/users/by/username/${encodeURIComponent(username)}`;
   const query = { "user.fields": "id" };
-  const headers = authHeaders("GET", url, query, mode);
+  const headers = authHeaders(url, query);
   const data = await httpGet<{ data?: { id?: string } }>(url, query, headers);
   const userId = data.data?.id;
   if (!userId) throw new Error(`Could not resolve user id for @${username}`);
@@ -192,52 +123,37 @@ export async function fetchRecentPosts(args: {
   username?: string;
   userId?: string;
 }): Promise<FetchRecentPostsResult> {
-  const mode = authMode();
   const startTime = isoUtcNowMinusDays(args.days);
   let username = args.username ?? process.env.X_USERNAME;
   let userId = args.userId ?? process.env.X_USER_ID;
-  // Tolerate cases where username is accidentally passed as --user-id.
   if (userId && !/^\d+$/.test(userId)) {
     if (!username) username = userId;
     userId = undefined;
   }
-  const run = async (activeMode: AuthMode): Promise<FetchRecentPostsResult> => {
-    if (!userId) {
-      if (!username) throw new Error("Provide username/user id or set X_USERNAME/X_USER_ID.");
-      userId = await resolveUserId(username, activeMode);
-    }
-    const url = `${API_BASE}/users/${userId}/tweets`;
-    const fields = ["created_at", "public_metrics"];
-    if (activeMode === "oauth1") fields.push("non_public_metrics");
-    const query = {
-      start_time: startTime,
-      max_results: String(Math.max(5, Math.min(args.maxResults, 100))),
-      "tweet.fields": fields.join(","),
-    };
-    const headers = authHeaders("GET", url, query, activeMode);
-    const response = await httpGet<{ data?: Post[]; meta?: Record<string, unknown> }>(url, query, headers);
-    return {
-      meta: {
-        days: args.days,
-        start_time: startTime,
-        auth_mode: activeMode,
-        username,
-        user_id: userId!,
-        post_count: response.data?.length ?? 0,
-      },
-      data: response.data ?? [],
-      raw_meta: response.meta ?? {},
-    };
-  };
-
-  try {
-    return await run(mode);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const canFallback = mode === "oauth1" && !!process.env.X_BEARER_TOKEN && message.includes("HTTP 429");
-    if (!canFallback) throw err;
-    return run("bearer");
+  if (!userId) {
+    if (!username) throw new Error("Provide username/user id or set X_USERNAME/X_USER_ID.");
+    userId = await resolveUserId(username);
   }
+  const url = `${API_BASE}/users/${userId}/tweets`;
+  const query = {
+    start_time: startTime,
+    max_results: String(Math.max(5, Math.min(args.maxResults, 100))),
+    "tweet.fields": "created_at,public_metrics",
+  };
+  const headers = authHeaders(url, query);
+  const response = await httpGet<{ data?: Post[]; meta?: Record<string, unknown> }>(url, query, headers);
+  return {
+    meta: {
+      days: args.days,
+      start_time: startTime,
+      auth_mode: "bearer",
+      username,
+      user_id: userId,
+      post_count: response.data?.length ?? 0,
+    },
+    data: response.data ?? [],
+    raw_meta: response.meta ?? {},
+  };
 }
 
 function topicQuery(topic: string): string {
@@ -254,7 +170,6 @@ export async function searchTopicPosts(args: {
   performantLikeThreshold?: number;
   maxTopicSearchAttempts?: number;
 }): Promise<TopicResearchResult> {
-  const mode = authMode();
   const days = Math.max(1, Math.min(args.days, 7));
   const startTime = isoUtcNowMinusDays(days);
   const perTopicResults = Math.max(10, Math.min(args.perTopicResults, 100));
@@ -265,7 +180,7 @@ export async function searchTopicPosts(args: {
 
   const payload: TopicResearchResult = {
     meta: {
-      auth_mode: mode,
+      auth_mode: "bearer",
       days,
       start_time: startTime,
       per_topic_results: perTopicResults,
@@ -399,68 +314,56 @@ export async function searchTopicPosts(args: {
     return buckets;
   };
 
-  const run = async (activeMode: AuthMode): Promise<TopicResearchResult> => {
-    const result: TopicResearchResult = {
-      ...payload,
-      meta: { ...payload.meta, auth_mode: activeMode },
-      topics: {},
-    };
-    if (combineTopicCalls) {
-      const aggregateBuckets: Record<string, Post[]> = {};
-      let attemptsUsed = 0;
-      for (let attempt = 1; attempt <= maxTopicSearchAttempts; attempt++) {
-        const combinedQuery = buildCombinedQuery(args.topics, attempt);
-        if (!combinedQuery) continue;
-        const maxResults = Math.max(
-          10,
-          Math.min(perTopicResults * Math.max(args.topics.length, 1) * Math.min(attempt, 2), 100)
-        );
-        const query = {
-          query: combinedQuery,
-          start_time: startTime,
-          max_results: String(maxResults),
-          "tweet.fields": "created_at,public_metrics,author_id",
-        };
-        const headers = authHeaders("GET", url, query, activeMode);
-        const data = await httpGet<{ data?: Post[] }>(url, query, headers);
-        const posts = data.data ?? [];
-        const passBuckets = bucketByTopic(args.topics, posts, perTopicResults);
-        const merged = mergeBuckets(aggregateBuckets, passBuckets);
-        Object.assign(aggregateBuckets, merged);
-        attemptsUsed = attempt;
-        if (hasPerformantPosts(aggregateBuckets, performantLikeThreshold)) {
-          break;
-        }
-      }
-      result.meta.attempts_used = attemptsUsed;
-      result.topics = aggregateBuckets;
-      return result;
-    }
-    for (const topic of args.topics) {
-      const queryText = topicQuery(topic);
-      if (!queryText) continue;
+  const result: TopicResearchResult = {
+    ...payload,
+    topics: {},
+  };
+  if (combineTopicCalls) {
+    const aggregateBuckets: Record<string, Post[]> = {};
+    let attemptsUsed = 0;
+    for (let attempt = 1; attempt <= maxTopicSearchAttempts; attempt++) {
+      const combinedQuery = buildCombinedQuery(args.topics, attempt);
+      if (!combinedQuery) continue;
+      const maxResults = Math.max(
+        10,
+        Math.min(perTopicResults * Math.max(args.topics.length, 1) * Math.min(attempt, 2), 100)
+      );
       const query = {
-        query: queryText,
+        query: combinedQuery,
         start_time: startTime,
-        max_results: String(perTopicResults),
+        max_results: String(maxResults),
         "tweet.fields": "created_at,public_metrics,author_id",
       };
-      const headers = authHeaders("GET", url, query, activeMode);
+      const headers = authHeaders(url, query);
       const data = await httpGet<{ data?: Post[] }>(url, query, headers);
-      result.topics[topic] = data.data ?? [];
+      const posts = data.data ?? [];
+      const passBuckets = bucketByTopic(args.topics, posts, perTopicResults);
+      const merged = mergeBuckets(aggregateBuckets, passBuckets);
+      Object.assign(aggregateBuckets, merged);
+      attemptsUsed = attempt;
+      if (hasPerformantPosts(aggregateBuckets, performantLikeThreshold)) {
+        break;
+      }
     }
-    result.meta.attempts_used = 1;
+    result.meta.attempts_used = attemptsUsed;
+    result.topics = aggregateBuckets;
     return result;
-  };
-
-  try {
-    return await run(mode);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const canFallback = mode === "oauth1" && !!process.env.X_BEARER_TOKEN && message.includes("HTTP 429");
-    if (!canFallback) throw err;
-    return run("bearer");
   }
+  for (const topic of args.topics) {
+    const queryText = topicQuery(topic);
+    if (!queryText) continue;
+    const query = {
+      query: queryText,
+      start_time: startTime,
+      max_results: String(perTopicResults),
+      "tweet.fields": "created_at,public_metrics,author_id",
+    };
+    const headers = authHeaders(url, query);
+    const data = await httpGet<{ data?: Post[] }>(url, query, headers);
+    result.topics[topic] = data.data ?? [];
+  }
+  result.meta.attempts_used = 1;
+  return result;
 }
 
 function normalizeTrendItem(raw: Record<string, unknown>): TrendItem | null {
@@ -478,14 +381,12 @@ export async function fetchTrendsByWoeid(args: {
   woeid?: number;
   limit?: number;
 }): Promise<TrendsResult> {
-  const mode = authMode();
   const woeid = Math.max(1, args.woeid ?? 1);
   const limit = Math.max(1, Math.min(args.limit ?? 25, 100));
   const url = `${API_BASE}/trends/by/woeid/${woeid}`;
-
-  const run = async (activeMode: AuthMode): Promise<TrendsResult> => {
-    const query = { max_trends: String(limit) };
-    const headers = authHeaders("GET", url, query, activeMode);
+  const query = { max_trends: String(limit) };
+  try {
+    const headers = authHeaders(url, query);
     const response = await httpGet<{ data?: Array<Record<string, unknown>> }>(url, query, headers);
     const trends = (response.data ?? [])
       .map((item) => normalizeTrendItem(item))
@@ -499,24 +400,16 @@ export async function fetchTrendsByWoeid(args: {
       },
       trends,
     };
-  };
-
-  try {
-    return await run(mode);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const canFallback = mode === "oauth1" && !!getBearerToken() && message.includes("HTTP 429");
-    if (!canFallback) {
-      return {
-        meta: {
-          woeid,
-          trend_count: 0,
-          note: `Trends lookup unavailable for WOEID ${woeid}.`,
-          error: message,
-        },
-        trends: [],
-      };
-    }
-    return run("bearer");
+    return {
+      meta: {
+        woeid,
+        trend_count: 0,
+        note: `Trends lookup unavailable for WOEID ${woeid}.`,
+        error: message,
+      },
+      trends: [],
+    };
   }
 }

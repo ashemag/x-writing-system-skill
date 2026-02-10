@@ -29,9 +29,11 @@ For ranking, the skill reads:
 
 ## Auth
 
-Use bearer token auth via `X_BEARER_TOKEN`.
+Bearer token only, same as [rohunvora/x-research-skill](https://github.com/rohunvora/x-research-skill):
 
-For this repo's intended setup, keep `X_AUTH_MODE=bearer`.
+- `X_BEARER_TOKEN` in env, or in `~/.config/env/global.env`
+- Every request: `Authorization: Bearer <token>`
+- Base URL: `https://api.x.com/2`
 
 ## Topic Search Notes
 
