@@ -1,0 +1,17 @@
+{
+  "name": "x-writing-system-skill",
+  "version": "0.2.0",
+  "private": true,
+  "description": "X writing-system skill with Bun/TypeScript CLI for personal + topic-based post optimization.",
+  "type": "module",
+  "scripts": {
+    "advise": "bun run x-search.ts advise",
+    "fetch": "bun run x-search.ts fetch",
+    "research": "bun run x-search.ts research",
+    "check": "bun run --bun tsc --noEmit"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.9",
+    "typescript": "^5.9.2"
+  }
+}

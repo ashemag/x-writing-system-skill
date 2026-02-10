@@ -1,111 +1,126 @@
 # x-writing-system-skill
 
-X writing system skill for Codex-style agents. It now runs a 4-step workflow:
+X writing-system skill for Codex, Claude Code, and OpenClaw, modeled after the hybrid structure used in [`rohunvora/x-research-skill`](https://github.com/rohunvora/x-research-skill).
 
-1. Apply generic writing-system guidelines.
-2. Pull and analyze your top-performing posts from the last 30 days.
-3. Research your draft topics on X and mine top public posts for learnings.
-4. Return learnings + suggestions + 5 improved X post versions.
+This repo pairs:
 
-Inspired by the structure and workflow style of [`rohunvora/x-research-skill`](https://github.com/rohunvora/x-research-skill).
+- `SKILL.md` (agent instructions + workflow)
+- `x-search.ts` (Bun CLI for X data collection)
+- `lib/*` (API, cache, analysis, formatting, types)
 
-## What it does
+## What this skill does
 
-- Fetches owned-account posts from the last 30 days.
-- Uses user-context auth to access non-public metrics (impressions) when available.
-- Ranks owned posts primarily by impressions, then engagement.
-- Extracts style patterns from your top performers.
-- Extracts topics from your draft and searches X for topic examples.
-- Ranks topic examples by public engagement to infer transferable patterns.
-- Produces:
-  - writing-system learnings,
-  - improvement suggestions,
-  - one primary rewrite,
-  - five improved post versions.
+Given a draft post, it builds a research brief in four parts:
 
-## Repo Structure
+1. Applies Matt Gray writing guidelines as baseline constraints.
+2. Pulls your best-performing posts from the last 30 days.
+3. Runs adaptive topic research on X to gather high-performing samples.
+4. Adds trends overlap + 3 recommendations, then hands off to the LLM to author 5 improved post versions.
+
+The CLI provides evidence. The final post versions are authored by the LLM (not static templates).
+
+## Setup
+
+### 1) Install Bun and dependencies
+
+```bash
+bun install
+```
+
+### 2) Add credentials
+
+```bash
+cp .env.example .env
+```
+
+Minimum required:
+
+- `X_BEARER_TOKEN`
+
+Optional:
+
+- `X_USERNAME` or `X_USER_ID` (can also be passed via flags)
+- OAuth1 keys if you want OAuth1 mode
+
+Env loading behavior:
+
+1. `--env-file` (if provided)
+2. `<repo>/.env`
+3. Bearer fallback: `~/.config/env/global.env` (only if token still missing)
+
+Existing process env vars are never overwritten.
+
+## CLI usage
+
+### Fetch your recent posts
+
+```bash
+bun run x-search.ts fetch --username ashebytes --max-results 100 --out data/recent_posts.json
+```
+
+### Topic research only
+
+```bash
+bun run x-search.ts research --topics "agent skills,x api,writing systems" --topic-max-results 40
+```
+
+### Full writing-system research brief
+
+```bash
+bun run x-search.ts advise \
+  --draft-file ./draft.txt \
+  --username ashebytes \
+  --performant-like-threshold 50 \
+  --topic-search-attempts 3
+```
+
+### Save markdown output
+
+```bash
+bun run x-search.ts advise --draft-file ./draft.txt --username ashebytes --save
+```
+
+## Command behavior
+
+- `fetch`: pulls your account posts in the selected window.
+- `research`: adaptive X topic search (combined query by default to reduce API calls).
+- `advise`: merges draft + personal winners + topic winners + trends into a markdown research brief.
+
+Quick mode (`--quick`) uses smaller pulls and longer cache TTL for cheaper iteration.
+
+## Output contract
+
+`advise` outputs:
+
+- Closest trending topics
+- Topic research sample posts (with metrics)
+- Top personal posts (with metrics)
+- 3 specific recommendations
+- LLM writing task to produce 5 final versions dynamically
+
+## Project layout
 
 ```text
 x-writing-system-skill/
 ├── SKILL.md
-├── x-writing.py
+├── x-search.ts
 ├── lib/
-│   ├── api.py
-│   └── analyze.py
+│   ├── analyze.ts
+│   ├── api.ts
+│   ├── cache.ts
+│   ├── env.ts
+│   ├── format.ts
+│   ├── guidelines.ts
+│   └── types.ts
 ├── references/
 │   └── x-api.md
 └── data/
     └── cache/
 ```
 
-## Setup
-
-Use environment variables:
-
-- `X_API_KEY`
-- `X_API_KEY_SECRET`
-- `X_ACCESS_TOKEN`
-- `X_ACCESS_TOKEN_SECRET`
-- `X_BEARER_TOKEN` (fallback for public metrics only)
-- `X_USERNAME` or `X_USER_ID`
-
-Env bootstrap behavior:
-
-- The CLI auto-loads `.env` in this repo if present.
-- It also auto-loads `../ashe_ai/.env` (without overriding already-set env vars).
-- You can add extra files with `--env-file <path>` (repeatable).
-
-## Usage
-
-Fetch posts (last 30 days by default):
-
-```bash
-python3 x-writing.py fetch --username ashebytes --out data/recent_posts.json
-```
-
-Print computed start time only:
-
-```bash
-python3 x-writing.py fetch --print-start-time
-```
-
-Generate suggestions from a draft:
-
-```bash
-python3 x-writing.py advise \
-  --draft "your draft post text here" \
-  --posts data/recent_posts.json
-```
-
-Or fetch + advise in one command:
-
-```bash
-python3 x-writing.py advise \
-  --draft-file ./draft.txt \
-  --username ashebytes
-```
-
-Override topics and include topic search:
-
-```bash
-python3 x-writing.py advise \
-  --draft-file ./draft.txt \
-  --username ashebytes \
-  --topics "creator economy,writing systems,x growth" \
-  --topic-max-results 30
-```
-
-Skip topic research:
-
-```bash
-python3 x-writing.py advise \
-  --draft-file ./draft.txt \
-  --username ashebytes \
-  --no-topic-research
-```
-
 ## Notes
 
-- X non-public metrics (including impressions) are only available for eligible owned/authorized posts and are most reliable in recent windows.
-- Topic research uses the X recent search endpoint and ranks by public engagement.
-- This project is read-only: it does not publish or modify posts.
+- Read-only skill: it never posts to X.
+- Recent search endpoint is used for topic research.
+- File cache is in `data/cache/`.
+- Keep `.env` local and never commit secrets.
