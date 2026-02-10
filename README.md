@@ -135,6 +135,31 @@ x-writing-system-skill/
     └── cache/
 ```
 
+## Rate limits
+
+The X API enforces per-endpoint rate limits on 15-minute rolling windows. The endpoints this skill hits most are:
+
+| Endpoint | App (Bearer) | Per 15 min |
+|---|---|---|
+| Recent search | 450 requests | 10–100 results per request, 512-char query max |
+| User tweet timeline | 10,000 requests | — |
+| User lookup | 300 requests | — |
+
+Every response includes three headers you can use to stay ahead of throttling:
+
+- `x-rate-limit-limit` — max requests allowed in the current window
+- `x-rate-limit-remaining` — requests left before you hit the wall
+- `x-rate-limit-reset` — Unix timestamp when the window resets
+
+If you exceed the limit the API returns **HTTP 429** (error code 88). The recommended recovery strategies from X's own docs:
+
+1. **Cache aggressively** — store responses locally to avoid redundant calls (this skill already does this via `data/cache/`).
+2. **Exponential backoff** — double the wait time with each retry after a 429.
+3. **Monitor headers** — check `x-rate-limit-remaining` before firing the next request, not after.
+4. **Prefer streaming over polling** — where applicable, use filtered stream endpoints instead of repeated search calls.
+
+In practice: use `--quick` mode during iteration (smaller pulls, longer cache TTL), and save full `advise` runs for when you actually need fresh data. If you're running the CLI in a loop or from a scheduled job, space your calls to stay well inside the 15-minute window.
+
 ## Notes
 
 - Read-only skill: it never posts to X.
